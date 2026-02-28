@@ -95,8 +95,75 @@ void run_command(char **args) {
 
 void bg_function(char **args) {
     pid_t spawnid_bg;
-    int spawnStatus_bg;
+    // int spawnStatus_bg;
     spawnid_bg = fork();
+
+    switch(spawnid_bg) {
+        case(-1):
+            printf("Error forking\n");
+            exit(1);
+            break;
+
+        case(0): {
+            int fd_in, fd_out;
+            
+            if (inputFile == NULL) {
+                fd_in = open("/dev/null", O_RDONLY);
+            }
+            else {
+                fd_in = open(inputFile, O_RDONLY);
+            }
+            
+            if (outputFile == NULL) {
+                fd_out = open("/dev/null", O_WRONLY);
+            }
+            else {
+                fd_out = open(outputFile, O_WRONLY);
+            }
+            
+            dup2(fd_in, STDIN_FILENO);
+            close(fd_in);
+            dup2(fd_out, STDOUT_FILENO);
+            close(fd_out);
+
+            if (execvp(args[0], args) == -1) {
+                fprintf(stderr, "%s: command not found\n", args[0]);
+                exit(1);
+            }
+        }
+        break;
+
+        default: {
+            bg_pids[bg_count++] = spawnid_bg;
+            printf("Background pid is %d\n", spawnid_bg);
+        }
+        break;
+    }
+}
+
+void poll_background_pids() {
+    for (int i = 0; i < bg_count; i++) {
+        int status;
+        pid_t result = waitpid(bg_pids[i], &status, WNOHANG);
+        if (result == -1) {
+            perror("waitpid");
+            exit(1);
+        }
+        if (result > 0) {
+            if (WIFEXITED(status)) {
+                last_status = WEXITSTATUS(status);
+            }
+            else {
+                last_status = WTERMSIG(status);
+            }
+            printf("Background pid %d is done: exit status %d\n", bg_pids[i], last_status);
+            for (int j = i; j < bg_count - 1; j++) {
+                bg_pids[j] = bg_pids[j + 1];
+            }
+            bg_count--;
+            i--;
+        }
+    }
 }
 
 int main() {
@@ -112,6 +179,8 @@ int main() {
 
         char *args[512];
         int i = 0;
+
+        poll_background_pids();
         
         printf(": ");
         fflush(stdout);
@@ -155,12 +224,19 @@ int main() {
                 } else if (strcmp(token, ">") == 0) {
                     token = strtok_r(NULL, " ", &saveptr);
                     outputFile = token;
+                } else if (*token == '&') {
+                    // Run background processes
+                    args[i] = NULL;  // NULL-terminate the args array
+                    // printf("DEBUG: Running background process: %s\n", args[0] ? args[0] : "NULL");
+                    bg_function(args);
+                    break;  // Exit parsing for background commands
                 } else {
                     args[i] = token;
                     i++;
                 }
                 token = strtok_r(NULL, " ", &saveptr);
             }
+
             args[i] = NULL;
 
             run_command(args);
