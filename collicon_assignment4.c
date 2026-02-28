@@ -5,9 +5,9 @@
     will need to use chdir() DONE
 4. set up status DONE
     will need keep track of most recent foreground process DONE
-5. set up other commands
+5. set up other commands DONE
     add commands to list
-6. set up redirection
+6. set up redirection DONE
 7. set up background processes
 8. set up signal handling
 
@@ -20,11 +20,15 @@
 #include <sys/wait.h>
 #include <signal.h>
 #include <unistd.h>
+#include <fcntl.h>
 
 pid_t bg_pids[100];
 int bg_count = 0;
 
 int last_status = 0;
+
+char *inputFile = NULL;
+char *outputFile = NULL;
 
 
 void exit_function() {
@@ -50,6 +54,26 @@ void run_command(char **args) {
             exit(1);
             break;
         case(0):
+            if (inputFile != NULL) {
+                int fd_in = open(inputFile, O_RDONLY);
+                if (fd_in == -1) {
+                    fprintf(stderr, "cannot open %s for input\n", inputFile);
+                    exit(1);  // last status to 1 also?
+                }
+                dup2(fd_in, STDIN_FILENO);
+                close(fd_in);
+            }
+
+            if (outputFile != NULL) {
+                int fd_out = open(outputFile, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+                if (fd_out == -1) {
+                    fprintf(stderr, "cannot open %s for output\n", outputFile);
+                    exit(1);
+                }
+                dup2(fd_out, STDOUT_FILENO);
+                close(fd_out);
+            }
+
             if (execvp(args[0], args) == -1) {
                 fprintf(stderr, "%s: command not found\n", args[0]);
                 exit(1);
@@ -69,9 +93,20 @@ void run_command(char **args) {
     }
 }
 
+void bg_function(char **args) {
+    pid_t spawnid_bg;
+    int spawnStatus_bg;
+    spawnid_bg = fork();
+}
+
 int main() {
     
     while (1) {
+        // need some sort of flag for if command was previously run - it looks like it's not printing a new line after
+
+        inputFile = NULL;
+        outputFile = NULL;
+
         char input[2048];
         char *saveptr;
 
@@ -114,8 +149,16 @@ int main() {
             char *token = command;  // This is kind of messy but will work for now
 
             while (token != NULL) {
-                args[i] = token;
-                i++;
+                if (strcmp(token, "<") == 0) {
+                    token = strtok_r(NULL, " ", &saveptr);
+                    inputFile = token;
+                } else if (strcmp(token, ">") == 0) {
+                    token = strtok_r(NULL, " ", &saveptr);
+                    outputFile = token;
+                } else {
+                    args[i] = token;
+                    i++;
+                }
                 token = strtok_r(NULL, " ", &saveptr);
             }
             args[i] = NULL;
