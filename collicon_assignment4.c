@@ -39,11 +39,44 @@ void cd_function(char *path) {
     chdir(path);
 }
 
+void run_command(char **args) {
+    pid_t spawnid;
+    int spawnStatus;
+    spawnid = fork();
+    
+    switch(spawnid) {
+        case(-1):
+            printf("Error forking\n");
+            exit(1);
+            break;
+        case(0):
+            if (execvp(args[0], args) == -1) {
+                fprintf(stderr, "%s: command not found\n", args[0]);
+                exit(1);
+            }
+            break;
+        default:
+            if (waitpid(spawnid, &spawnStatus, 0) == -1) {
+                perror("waitpid");
+                exit(1);
+            }
+            if (WIFEXITED(spawnStatus)) {
+                last_status = WEXITSTATUS(spawnStatus);
+            }
+            else {
+                last_status = WTERMSIG(spawnStatus);
+            }
+    }
+}
+
 int main() {
     
     while (1) {
         char input[2048];
         char *saveptr;
+
+        char *args[512];
+        int i = 0;
         
         printf(": ");
         fflush(stdout);
@@ -75,6 +108,19 @@ int main() {
                 directory = getenv("HOME");
             }
             cd_function(directory);
+        }
+
+        else { // add an if?
+            char *token = command;  // This is kind of messy but will work for now
+
+            while (token != NULL) {
+                args[i] = token;
+                i++;
+                token = strtok_r(NULL, " ", &saveptr);
+            }
+            args[i] = NULL;
+
+            run_command(args);
         }
         
 
