@@ -54,6 +54,12 @@ void run_command(char **args) {
             exit(1);
             break;
         case(0):
+            struct sigaction sa_default = {0};
+            sa_default.sa_handler = SIG_DFL;
+            sigfillset(&sa_default.sa_mask);
+            sa_default.sa_flags = 0;
+            sigaction(SIGINT, &sa_default, NULL);
+
             if (inputFile != NULL) {
                 int fd_in = open(inputFile, O_RDONLY);
                 if (fd_in == -1) {
@@ -89,6 +95,9 @@ void run_command(char **args) {
             }
             else {
                 last_status = WTERMSIG(spawnStatus);
+                if (last_status == SIGINT) {
+                    printf("Terminated by signal %d\n", last_status);
+                }
             }
     }
 }
@@ -167,6 +176,11 @@ void poll_background_pids() {
 }
 
 int main() {
+    struct sigaction sa_ignore = {0};
+    sa_ignore.sa_handler = SIG_IGN;
+    sigemptyset(&sa_ignore.sa_mask);
+    sa_ignore.sa_flags = 0;
+    sigaction(SIGINT, &sa_ignore, NULL);
     
     while (1) {
         // need some sort of flag for if command was previously run - it looks like it's not printing a new line after
