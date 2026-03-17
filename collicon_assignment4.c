@@ -30,6 +30,8 @@ int last_status = 0;
 char *inputFile = NULL;
 char *outputFile = NULL;
 
+volatile sig_atomic_t foreground_mode = 0;
+int is_background = 0;
 
 void exit_function() {
     for (int i = 0; i < bg_count; i++) {
@@ -59,6 +61,12 @@ void run_command(char **args) {
             sigfillset(&sa_default.sa_mask);
             sa_default.sa_flags = 0;
             sigaction(SIGINT, &sa_default, NULL);
+
+            struct sigaction sa_ignore = {0};
+            sa_ignore.sa_handler = SIG_IGN;
+            sigfillset(&sa_ignore.sa_mask);
+            sa_ignore.sa_flags = 0;
+            sigaction(SIGTSTP, &sa_ignore, NULL);
 
             if (inputFile != NULL) {
                 int fd_in = open(inputFile, O_RDONLY);
@@ -114,6 +122,12 @@ void bg_function(char **args) {
             break;
 
         case(0): {
+            struct sigaction sa_ignore = {0};
+            sa_ignore.sa_handler = SIG_IGN;
+            sigfillset(&sa_ignore.sa_mask);
+            sa_ignore.sa_flags = 0;
+            sigaction(SIGTSTP, &sa_ignore, NULL);
+
             int fd_in, fd_out;
             
             if (inputFile == NULL) {
@@ -165,7 +179,10 @@ void poll_background_pids() {
             else {
                 last_status = WTERMSIG(status);
             }
-            printf("Background pid %d is done: exit status %d\n", bg_pids[i], last_status);
+            if (last_status == 15) {
+                printf("Background pid %d is done: terminated by signal 15", bg_pids[i]);
+            } else {printf("Background pid %d is done: exit status %d\n", bg_pids[i], last_status);}
+            
             for (int j = i; j < bg_count - 1; j++) {
                 bg_pids[j] = bg_pids[j + 1];
             }
@@ -175,12 +192,30 @@ void poll_background_pids() {
     }
 }
 
+void handle_sigtstp(int sigNo) {
+    if (foreground_mode == 0) {
+        char* message = "\nEntering foreground-only mode (& is now ignored)\n: ";
+        write(STDOUT_FILENO, message, 52);
+        foreground_mode = 1;
+    } else {
+        char* message = "\nExiting foreground-only mode\n: ";
+        write(STDOUT_FILENO, message, 33);
+        foreground_mode = 0;
+    }
+}
+
 int main() {
     struct sigaction sa_ignore = {0};
     sa_ignore.sa_handler = SIG_IGN;
     sigemptyset(&sa_ignore.sa_mask);
     sa_ignore.sa_flags = 0;
     sigaction(SIGINT, &sa_ignore, NULL);
+
+    struct sigaction sa_tstp = {0};
+    sa_tstp.sa_handler = handle_sigtstp;
+    sigfillset(&sa_tstp.sa_mask);
+    sa_tstp.sa_flags = SA_RESTART;
+    sigaction(SIGTSTP, &sa_tstp, NULL);
     
     while (1) {
         // need some sort of flag for if command was previously run - it looks like it's not printing a new line after
@@ -230,6 +265,7 @@ int main() {
 
         else { // add an if?
             char *token = command;  // This is kind of messy but will work for now
+            is_background = 0;  // Reset background flag for each command
 
             while (token != NULL) {
                 if (strcmp(token, "<") == 0) {
@@ -240,10 +276,15 @@ int main() {
                     outputFile = token;
                 } else if (*token == '&') {
                     // Run background processes
-                    args[i] = NULL;  // NULL-terminate the args array
-                    // printf("DEBUG: Running background process: %s\n", args[0] ? args[0] : "NULL");
-                    bg_function(args);
-                    break;  // Exit parsing for background commands
+                    if (foreground_mode == 0) {
+                        is_background = 1;
+                        
+                        if (is_background) {
+                            args[i] = NULL;
+                            bg_function(args);
+                            break;
+                        }
+                    }
                 } else {
                     args[i] = token;
                     i++;
@@ -253,7 +294,9 @@ int main() {
 
             args[i] = NULL;
 
-            run_command(args);
+            if (is_background == 0) {
+                run_command(args);
+            }
         }
         
 
